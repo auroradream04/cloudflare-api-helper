@@ -15,7 +15,8 @@ export const checkApiKey = (key: string) => {
 export const fetchAllZones = async (bearerToken: string, page: number) => {
     const response = await fetch(listZoneEndpoint + "?per_page=500&page=" + page, {
         headers: {
-            "Authorization": bearerToken as string
+            "Authorization": bearerToken as string,
+            "Content-Type": "application/json"
         }
     });
 
@@ -26,7 +27,8 @@ export const fetchAllZones = async (bearerToken: string, page: number) => {
 export const fetchAllDnsRecords = async (bearerToken: string, zoneId: string) => {
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records", {
         headers: {
-            "Authorization": bearerToken as string
+            "Authorization": bearerToken as string,
+            "Content-Type": "application/json"
         }
     });
 
@@ -39,9 +41,50 @@ export const updateDnsRecord = async (bearerToken: string, zoneId: string, recor
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records/" + recordId, {
         method: "PATCH",
         headers: {
-            "Authorization": bearerToken as string
+            "Authorization": bearerToken as string,
+            "Content-Type": "application/json"
         },
         body: JSON.stringify({
+            content: newIp
+        })
+    });
+
+    const data = await response.json();
+    return data;
+}
+
+export const createZone = async (authKey: string, authEmail: string, zoneName: string, accountId: string, type: string) => {
+    const response = await fetch(listZoneEndpoint, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Auth-Key": authKey,
+            "X-Auth-Email": authEmail
+        },
+        body: JSON.stringify({
+            name: zoneName,
+            type: type,
+            account: {
+                id: accountId
+            }
+        })
+    });
+
+    const data = await response.json();
+    return data;
+}
+
+export const createDnsRecord = async (authKey: string, authEmail: string, zoneId: string, dnsRecordName: string[], newIp: string) => {
+    const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Auth-Key": authKey,
+            "X-Auth-Email": authEmail
+        },
+        body: JSON.stringify({
+            name: dnsRecordName,
+            type: "A",
             content: newIp
         })
     });

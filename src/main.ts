@@ -1,6 +1,6 @@
 import dotenv from "dotenv"
 import express from "express";
-import { checkApiKey, fetchAllDnsRecords, fetchAllZones, updateDnsRecord } from "./util";
+import { checkApiKey, createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateDnsRecord } from "./util";
 
 // Load environment variables as early as possible
 dotenv.config();
@@ -10,8 +10,6 @@ const app = express();
 
 app.use(express.json());
 
-
-const listZoneEndpoint = "https://api.cloudflare.com/client/v4/zones";
 
 app.get("/", (req, res) => {
     res.send("Hello World");
@@ -95,6 +93,47 @@ app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
 
 
     res.status(200).json({ message: "Success" });
+});
+
+app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
+    const body = req.body;
+    const apiKey = body.API_KEY;
+    const domainName = req.body.domain_name;
+    const dnsRecordNames = req.body.dns_record_names;
+    const accountId = req.body.account_id;
+    const type = req.body.type;
+    const ip = req.body.ip;
+    const authKey = req.body["X-Auth-Key"];
+    const authEmail = req.body["X-Auth-Email"];
+
+    // Check api key
+    if (!checkApiKey(apiKey)) {
+        res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // Check auth key
+    if (!authKey) {
+        res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!domainName || !dnsRecordNames || !accountId || !type || !ip) {
+        res.status(400).json({ message: "Bad Request" });
+    }
+
+    // Create a new zone
+    const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+
+    // Create a new DNS record
+    const dnsRecordIds = [];
+    for (const dnsRecordName of dnsRecordNames) {
+        const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
+        const createDnsRecordResponse = await createDnsRecord(authKey, authEmail, createZoneResponse.result.id, name, ip);
+        console.log(createDnsRecordResponse);
+        dnsRecordIds.push(createDnsRecordResponse.result.name);
+    }
+
+
+    res.status(200).json({ message: "Success", dns_record_ids: dnsRecordIds });
 });
 
 app.listen(port, () => {
