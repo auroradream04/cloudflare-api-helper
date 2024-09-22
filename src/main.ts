@@ -65,6 +65,8 @@ app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
     // Fetch all zones
     const allZones = await fetchAllZones(authKey, authEmail, 1);
 
+    const successfulDomains: string[] = [];
+
     // Loop through each zone
     for (const zone of allZones.result) {
         const zoneId = zone.id;
@@ -85,10 +87,16 @@ app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
                     await updateDnsRecord(authKey, authEmail, zoneId, recordId, record, newIp);
                 }
             }
-        }
+
+            console.log(`Updated ${zoneName} with ${newIp}`);
+            successfulDomains.push(zoneName);
+        } 
     }
 
-    res.status(200).json({ message: "Success" });
+    const failedDomains: string[] = domainList.filter(domain => !successfulDomains.includes(domain));
+
+    console.log("Finished!");
+    res.status(200).json({ successful_domains: successfulDomains, failed_domains: failedDomains });
 });
 
 app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
@@ -122,7 +130,6 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
         console.log(createDnsRecordResponse);
         dnsRecordIds.push(createDnsRecordResponse.result.name);
     }
-
 
     res.status(200).json({ message: "Success", dns_record_ids: dnsRecordIds });
 });
