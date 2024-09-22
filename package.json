@@ -1,18 +1,19 @@
 {
   "name": "cloudflare-api-helper",
   "version": "1.0.0",
-  "description": "",
+  "description": "A simple Cloudflare API helper for updating DNS records",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon"
+    "dev": "nodemon",
+    "start": "ts-node src/main.ts"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/auroradream04/cloudflare-api-helper.git"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "auroradream04",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/auroradream04/cloudflare-api-helper/issues"
   },
