@@ -12,10 +12,11 @@ export const checkApiKey = (key: string) => {
     return false;
 }
 
-export const fetchAllZones = async (bearerToken: string, page: number) => {
+export const fetchAllZones = async (authKey: string, authEmail: string, page: number) => {
     const response = await fetch(listZoneEndpoint + "?per_page=500&page=" + page, {
         headers: {
-            "Authorization": bearerToken as string,
+            "X-Auth-Key": authKey as string,
+            "X-Auth-Email": authEmail as string,
             "Content-Type": "application/json"
         }
     });
@@ -24,10 +25,11 @@ export const fetchAllZones = async (bearerToken: string, page: number) => {
     return data;
 }
 
-export const fetchAllDnsRecords = async (bearerToken: string, zoneId: string) => {
+export const fetchAllDnsRecords = async (authKey: string, authEmail: string, zoneId: string) => {
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records", {
         headers: {
-            "Authorization": bearerToken as string,
+            "X-Auth-Key": authKey as string,
+            "X-Auth-Email": authEmail as string,
             "Content-Type": "application/json"
         }
     });
@@ -37,11 +39,12 @@ export const fetchAllDnsRecords = async (bearerToken: string, zoneId: string) =>
 
 }
 
-export const updateDnsRecord = async (bearerToken: string, zoneId: string, recordId: string, record: any, newIp: string) => {
+export const updateDnsRecord = async (authKey: string, authEmail: string, zoneId: string, recordId: string, record: any, newIp: string) => {
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records/" + recordId, {
         method: "PATCH",
         headers: {
-            "Authorization": bearerToken as string,
+            "X-Auth-Key": authKey as string,
+            "X-Auth-Email": authEmail as string,
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
