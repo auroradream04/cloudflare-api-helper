@@ -1,6 +1,6 @@
 import dotenv from "dotenv"
 import express from "express";
-import { checkApiKey, createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateDnsRecord } from "./util";
+import { createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateDnsRecord } from "./util";
 
 // Load environment variables as early as possible
 dotenv.config();
@@ -12,22 +12,18 @@ app.use(express.json());
 
 
 app.get("/", (req, res) => {
-    res.send("Hello World");
+    res.status(200).json({
+        message: "Welcome to Cloudflare API Helper by @auroradream04 (https://github.com/auroradream04/cloudflare-api-helper)"
+    });
 });
 
 app.post("/api/v1/cloudflare/getAllZones", async (req, res) => {
     const body = req.body;
-    const apiKey = body.API_KEY;
-    const authKey = req.body["X-Auth-Key"];
-    const authEmail = req.body["X-Auth-Email"];
-    const page = parseInt(req.body.page || "1");
+    const authKey = body["X-Auth-Key"];
+    const authEmail = body["X-Auth-Email"];
+    const page = parseInt(body.page || "1");
 
-    // Check api key
-    if (!checkApiKey(apiKey)) {
-        res.status(401).json({ message: "Unauthorized" });
-    }
-
-    // Check bearer token
+    // Check auth key and email
     if (!authKey || !authEmail) {
         res.status(401).json({ message: "Unauthorized" });
     }
@@ -40,19 +36,13 @@ app.post("/api/v1/cloudflare/getAllZones", async (req, res) => {
 
 app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
     const body = req.body;
-    const apiKey = body.API_KEY;
-    const authKey = req.body["X-Auth-Key"];
-    const authEmail = req.body["X-Auth-Email"];
-    const domains = req.body.domains;
-    const domainListEndpoint = req.body.domain_list_endpoint;
-    const newIp = req.body.new_ip;
+    const authKey = body["X-Auth-Key"];
+    const authEmail = body["X-Auth-Email"];
+    const domains = body.domains;
+    const domainListEndpoint = body.domain_list_endpoint;
+    const newIp = body.new_ip;
 
-    // Check api key
-    if (!checkApiKey(apiKey)) {
-        res.status(401).json({ message: "Unauthorized" });
-    }
-
-    // Check bearer token
+    // Check auth key and email
     if (!authKey || !authEmail) {
         res.status(401).json({ message: "Unauthorized" });
     }
@@ -94,33 +84,25 @@ app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
                 if (recordType === "A") {
                     await updateDnsRecord(authKey, authEmail, zoneId, recordId, record, newIp);
                 }
-
             }
         }
     }
-
 
     res.status(200).json({ message: "Success" });
 });
 
 app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     const body = req.body;
-    const apiKey = body.API_KEY;
-    const authKey = req.body["X-Auth-Key"];
-    const authEmail = req.body["X-Auth-Email"];
-    const domainName = req.body.domain_name;
-    const dnsRecordNames = req.body.dns_record_names;
-    const accountId = req.body.account_id;
-    const type = req.body.type;
-    const ip = req.body.ip;
+    const authKey = body["X-Auth-Key"];
+    const authEmail = body["X-Auth-Email"];
+    const domainName = body.domain_name;
+    const dnsRecordNames = body.dns_record_names;
+    const accountId = body.account_id;
+    const type = body.type;
+    const ip = body.ip;
 
-    // Check api key
-    if (!checkApiKey(apiKey)) {
-        res.status(401).json({ message: "Unauthorized" });
-    }
-
-    // Check auth key
-    if (!authKey) {
+    // Check auth key and email
+    if (!authKey || !authEmail) {
         res.status(401).json({ message: "Unauthorized" });
     }
 

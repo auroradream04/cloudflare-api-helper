@@ -4,14 +4,6 @@ dotenv.config();
 
 const listZoneEndpoint = "https://api.cloudflare.com/client/v4/zones";
 
-export const checkApiKey = (key: string) => {
-    const apiKey = process.env.API_KEY;
-    if (key === apiKey) {
-        return true;
-    }
-    return false;
-}
-
 export const fetchAllZones = async (authKey: string, authEmail: string, page: number) => {
     const response = await fetch(listZoneEndpoint + "?per_page=500&page=" + page, {
         headers: {
