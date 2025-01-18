@@ -103,7 +103,7 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     const body = req.body;
     const authKey = body["X-Auth-Key"];
     const authEmail = body["X-Auth-Email"];
-    const domainName = body.domain_name;
+    const domains = Array.isArray(body.domain_name) ? body.domain_name : [body.domain_name];
     const dnsRecordNames = body.dns_record_names;
     const accountId = body.account_id;
     const type = body.type;
@@ -111,27 +111,55 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
 
     // Check auth key and email
     if (!authKey || !authEmail) {
-        res.status(401).json({ message: "Unauthorized" });
+        return res.status(401).json({ message: "Unauthorized" });
     }
 
     // Bad requests
-    if (!domainName || !dnsRecordNames || !accountId || !type || !ip) {
-        res.status(400).json({ message: "Bad Request" });
+    if (!domains.length || !dnsRecordNames || !accountId || !type || !ip) {
+        return res.status(400).json({ message: "Bad Request" });
     }
 
-    // Create a new zone
-    const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+    const results = [];
+    const errors = [];
 
-    // Create a new DNS record
-    const dnsRecordIds = [];
-    for (const dnsRecordName of dnsRecordNames) {
-        const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
-        const createDnsRecordResponse = await createDnsRecord(authKey, authEmail, createZoneResponse.result.id, name, ip);
-        console.log(createDnsRecordResponse);
-        dnsRecordIds.push(createDnsRecordResponse.result.name);
+    // Process each domain
+    for (const domainName of domains) {
+        try {
+            // Create a new zone
+            const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+            
+            // Create DNS records for this zone
+            const dnsRecordIds = [];
+            for (const dnsRecordName of dnsRecordNames) {
+                const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
+                const createDnsRecordResponse = await createDnsRecord(
+                    authKey, 
+                    authEmail, 
+                    createZoneResponse.result.id, 
+                    name, 
+                    ip
+                );
+                dnsRecordIds.push(createDnsRecordResponse.result.name);
+            }
+
+            results.push({
+                domain: domainName,
+                status: "success",
+                dns_record_ids: dnsRecordIds
+            });
+        } catch (error) {
+            errors.push({
+                domain: domainName,
+                error: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
     }
 
-    res.status(200).json({ message: "Success", dns_record_ids: dnsRecordIds });
+    res.status(200).json({
+        message: "Operation completed",
+        results,
+        errors
+    });
 });
 
 app.listen(port, () => {
