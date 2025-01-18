@@ -107,7 +107,7 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     const dnsRecordNames = body.dns_record_names;
     const accountId = body.account_id;
     const type = body.type;
-    const ip = body.ip;
+    const startingIp = body.ip; // This will be the first IP address
 
     // Check auth key and email
     if (!authKey || !authEmail) {
@@ -115,16 +115,23 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     }
 
     // Bad requests
-    if (!domains.length || !dnsRecordNames || !accountId || !type || !ip) {
+    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp) {
         return res.status(400).json({ message: "Bad Request" });
     }
 
     const results = [];
     const errors = [];
 
+    // Split IP into octets for incrementing
+    const ipParts = startingIp.split('.');
+    let currentIpLastOctet = parseInt(ipParts[3]);
+
     // Process each domain
     for (const domainName of domains) {
         try {
+            // Construct current IP
+            const currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+
             // Create a new zone
             const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
             
@@ -137,16 +144,20 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
                     authEmail, 
                     createZoneResponse.result.id, 
                     name, 
-                    ip
+                    currentIp
                 );
                 dnsRecordIds.push(createDnsRecordResponse.result.name);
             }
 
             results.push({
                 domain: domainName,
+                ip: currentIp,
                 status: "success",
                 dns_record_ids: dnsRecordIds
             });
+
+            // Increment IP for next domain
+            currentIpLastOctet++;
         } catch (error) {
             errors.push({
                 domain: domainName,
