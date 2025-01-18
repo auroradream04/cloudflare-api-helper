@@ -73,20 +73,50 @@ npm start
    - Response: JSON object with success message
 
 3. `POST /api/v1/cloudflare/createZoneWithDnsRecord`
-   - Description: Create a new zone and add DNS records
+   - Description: Create new zones and add DNS records with automatically incrementing IP addresses
    - Request body:
      ```json
      {
        "X-Auth-Key": "your_auth_key",
        "X-Auth-Email": "your_auth_email",
-       "domain_name": "example.com",
+       "domain_name": ["example1.com", "example2.com", "example3.com"],  // Single domain or array of domains
        "dns_record_names": ["@", "www", "subdomain"],
        "account_id": "your_account_id",
        "type": "full", // Zone type
-       "ip": "192.168.1.1" // IP address for DNS records
+       "ip": "160.121.75.132" // Starting IP address - will increment for each domain
      }
      ```
-   - Response: JSON object with success message and created DNS record IDs
+   - Response:
+     ```json
+     {
+       "message": "Operation completed",
+       "results": [
+         {
+           "domain": "example1.com",
+           "ip": "160.121.75.132",
+           "status": "success",
+           "dns_record_ids": ["example1.com", "www.example1.com", "subdomain.example1.com"]
+         },
+         {
+           "domain": "example2.com",
+           "ip": "160.121.75.133",
+           "status": "success",
+           "dns_record_ids": ["example2.com", "www.example2.com", "subdomain.example2.com"]
+         },
+         {
+           "domain": "example3.com",
+           "ip": "160.121.75.134",
+           "status": "success",
+           "dns_record_ids": ["example3.com", "www.example3.com", "subdomain.example3.com"]
+         }
+       ],
+       "errors": []
+     }
+     ```
+   - Notes: 
+     - The IP address will automatically increment for each domain (last octet only)
+     - Each domain will have all specified DNS records pointing to its assigned IP
+     - You can provide either a single domain as a string or multiple domains as an array
 
 Note: All endpoints require authentication using the API_KEY, X-Auth-Key, and X-Auth-Email. Make sure to replace these with your actual Cloudflare API credentials.
 
