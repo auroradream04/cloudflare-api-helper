@@ -5,7 +5,7 @@ import { createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateD
 // Load environment variables as early as possible
 dotenv.config();
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 6100;
 const app = express();
 
 app.use(express.json());
@@ -99,7 +99,7 @@ app.post("/api/v1/cloudflare/updateAllDnsRecord", async (req, res) => {
     res.status(200).json({ successful_domains: successfulDomains, failed_domains: failedDomains });
 });
 
-app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
+app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     const body = req.body;
     const authKey = body["X-Auth-Key"];
     const authEmail = body["X-Auth-Email"];
@@ -107,7 +107,7 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     const dnsRecordNames = body.dns_record_names;
     const accountId = body.account_id;
     const type = body.type;
-    const startingIp = body.ip; // This will be the first IP address
+    const startingIp = body.ip;
 
     // Check auth key and email
     if (!authKey || !authEmail) {
@@ -126,33 +126,75 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
     const ipParts = startingIp.split('.');
     let currentIpLastOctet = parseInt(ipParts[3]);
 
+    // Fetch all existing zones first
+    const existingZones = await fetchAllZones(authKey, authEmail, 1);
+    const zoneMap = new Map(existingZones.result.map((zone: any) => [zone.name, zone]));
+
     // Process each domain
     for (const domainName of domains) {
         try {
             // Construct current IP
             const currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+            let zoneId;
+            let action = "created";
 
-            // Create a new zone
-            const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+            // Check if zone exists
+            if (zoneMap.has(domainName)) {
+                // Use existing zone
+                const zone: any = zoneMap.get(domainName);
+                zoneId = zone?.id; 
+                action = "updated";
+            } else {
+                // Create new zone
+                const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+                zoneId = createZoneResponse.result.id;
+            }
+
+            // Fetch existing DNS records if zone existed
+            const existingRecords = action === "updated" 
+                ? await fetchAllDnsRecords(authKey, authEmail, zoneId)
+                : { result: [] };
             
-            // Create DNS records for this zone
             const dnsRecordIds = [];
+            
+            // Process each DNS record
             for (const dnsRecordName of dnsRecordNames) {
                 const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
-                const createDnsRecordResponse = await createDnsRecord(
-                    authKey, 
-                    authEmail, 
-                    createZoneResponse.result.id, 
-                    name, 
-                    currentIp
+                
+                // Find existing record
+                const existingRecord = existingRecords.result.find(
+                    (record: any) => record.name === name && record.type === "A"
                 );
-                dnsRecordIds.push(createDnsRecordResponse.result.name);
+
+                let recordResponse;
+                if (existingRecord) {
+                    // Update existing record
+                    recordResponse = await updateDnsRecord(
+                        authKey,
+                        authEmail,
+                        zoneId,
+                        existingRecord.id,
+                        existingRecord,
+                        currentIp
+                    );
+                } else {
+                    // Create new record
+                    recordResponse = await createDnsRecord(
+                        authKey,
+                        authEmail,
+                        zoneId,
+                        name,
+                        currentIp
+                    );
+                }
+                dnsRecordIds.push(recordResponse.result.name);
             }
 
             results.push({
                 domain: domainName,
                 ip: currentIp,
                 status: "success",
+                action: action,
                 dns_record_ids: dnsRecordIds
             });
 
