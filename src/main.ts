@@ -5,11 +5,25 @@ import { createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateD
 // Load environment variables as early as possible
 dotenv.config();
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 6100;
 const app = express();
 
 app.use(express.json());
 
+interface CloudflareZone {
+    id: string;
+    name: string;
+}
+
+interface CloudflareDnsRecord {
+    id: string;
+    name: string;
+    type: string;
+}
+
+interface CloudflareResponse {
+    result: CloudflareZone[] | CloudflareDnsRecord[];
+}
 
 app.get("/", (req, res) => {
     res.status(200).json({
@@ -153,6 +167,124 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
                 domain: domainName,
                 ip: currentIp,
                 status: "success",
+                dns_record_ids: dnsRecordIds
+            });
+
+            // Increment IP for next domain
+            currentIpLastOctet++;
+        } catch (error) {
+            errors.push({
+                domain: domainName,
+                error: error instanceof Error ? error.message : "Unknown error occurred"
+            });
+        }
+    }
+
+    res.status(200).json({
+        message: "Operation completed",
+        results,
+        errors
+    });
+});
+
+app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
+    const body = req.body;
+    const authKey = body["X-Auth-Key"];
+    const authEmail = body["X-Auth-Email"];
+    const domains = Array.isArray(body.domain_name) ? body.domain_name : [body.domain_name];
+    const dnsRecordNames = body.dns_record_names;
+    const accountId = body.account_id;
+    const type = body.type;
+    const startingIp = body.ip;
+
+    // Check auth key and email
+    if (!authKey || !authEmail) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    // Bad requests
+    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp) {
+        return res.status(400).json({ message: "Bad Request" });
+    }
+
+    const results = [];
+    const errors = [];
+
+    // Split IP into octets for incrementing
+    const ipParts = startingIp.split('.');
+    let currentIpLastOctet = parseInt(ipParts[3]);
+
+    // Fetch all existing zones first
+    const existingZones = await fetchAllZones(authKey, authEmail, 1);
+    const zoneMap = new Map(
+        (existingZones.result as CloudflareZone[]).map((zone: CloudflareZone) => [zone.name, zone])
+    );
+
+    // Process each domain
+    for (const domainName of domains) {
+        try {
+            // Construct current IP
+            const currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+            let zoneId;
+            let action = "created";
+
+            // Check if zone exists
+            const existingZone = zoneMap.get(domainName) as CloudflareZone | undefined;
+            if (existingZone) {
+                // Use existing zone
+                zoneId = existingZone.id;
+                action = "updated";
+            } else {
+                // Create new zone
+                const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+                zoneId = createZoneResponse.result.id;
+            }
+
+            // Fetch existing DNS records if zone existed
+            const existingRecords = action === "updated" 
+                ? await fetchAllDnsRecords(authKey, authEmail, zoneId)
+                : { result: [] };
+            
+            const dnsRecordIds = [];
+            
+            // Process each DNS record
+            for (const dnsRecordName of dnsRecordNames) {
+                const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
+                
+                // Find existing record
+                const existingRecord = (existingRecords.result as CloudflareDnsRecord[]).find(
+                    (record: CloudflareDnsRecord) => record.name === name && record.type === "A"
+                );
+
+                let recordResponse;
+                if (existingRecord) {
+                    // Update existing record
+                    recordResponse = await updateDnsRecord(
+                        authKey,
+                        authEmail,
+                        zoneId,
+                        existingRecord.id,
+                        existingRecord,
+                        currentIp
+                    );
+                } else {
+                    // Create new record
+                    recordResponse = await createDnsRecord(
+                        authKey,
+                        authEmail,
+                        zoneId,
+                        name,
+                        currentIp
+                    );
+                }
+                dnsRecordIds.push(recordResponse.result.name);
+            }
+
+            results.push({
+                domain: domainName,
+                ip: currentIp,
+                status: "success",
+                action: action,
                 dns_record_ids: dnsRecordIds
             });
 
