@@ -196,6 +196,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     const accountId = body.account_id;
     const type = body.type;
     const startingIp = body.ip;
+    const mode = body.mode;
 
     // Check auth key and email
     if (!authKey || !authEmail) {
@@ -203,7 +204,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     }
 
     // Bad requests
-    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp) {
+    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp || !mode) {
         return res.status(400).json({ message: "Bad Request" });
     }
 
@@ -289,7 +290,12 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
             });
 
             // Increment IP for next domain
-            currentIpLastOctet++;
+            if (mode === "increment") {
+                currentIpLastOctet++;
+            } else if (mode === "decrement") {
+                currentIpLastOctet--;
+            } 
+
         } catch (error) {
             errors.push({
                 domain: domainName,
