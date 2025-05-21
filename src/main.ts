@@ -196,7 +196,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     const accountId = body.account_id;
     const type = body.type;
     const startingIp = body.ip;
-    const mode = body.mode;
+    const mode = body.mode || "increment"; // Default to increment if not specified
 
     // Check auth key and email
     if (!authKey || !authEmail) {
@@ -204,7 +204,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     }
 
     // Bad requests
-    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp || !mode) {
+    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp) {
         return res.status(400).json({ message: "Bad Request" });
     }
 
@@ -215,11 +215,29 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     const ipParts = startingIp.split('.');
     let currentIpLastOctet = parseInt(ipParts[3]);
 
-    // Fetch all existing zones first
-    const existingZones = await fetchAllZones(authKey, authEmail, 1);
-    const zoneMap = new Map(
-        (existingZones.result as CloudflareZone[]).map((zone: CloudflareZone) => [zone.name, zone])
-    );
+    // Fetch ALL existing zones (handling pagination)
+    const zoneMap = new Map<string, CloudflareZone>();
+    let page = 1;
+    let hasMorePages = true;
+    
+    while (hasMorePages) {
+        const existingZones = await fetchAllZones(authKey, authEmail, page);
+        
+        // Add zones to our map
+        (existingZones.result as CloudflareZone[]).forEach((zone: CloudflareZone) => {
+            zoneMap.set(zone.name, zone);
+        });
+        
+        // Check if we need to fetch more pages
+        if (existingZones.result.length === 0 || existingZones.result.length < 50) {
+            // Assuming 50 is the page size (adjust if needed)
+            hasMorePages = false;
+        } else {
+            page++;
+        }
+    }
+
+    console.log(`Found ${zoneMap.size} zones in Cloudflare account`);
 
     // Process each domain
     for (const domainName of domains) {
@@ -230,7 +248,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
             let action = "created";
 
             // Check if zone exists
-            const existingZone = zoneMap.get(domainName) as CloudflareZone | undefined;
+            const existingZone = zoneMap.get(domainName);
             if (existingZone) {
                 // Use existing zone
                 zoneId = existingZone.id;
@@ -241,11 +259,8 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                 zoneId = createZoneResponse.result.id;
             }
 
-            // Fetch existing DNS records if zone existed
-            const existingRecords = action === "updated" 
-                ? await fetchAllDnsRecords(authKey, authEmail, zoneId)
-                : { result: [] };
-            
+            // Fetch existing DNS records
+            const existingRecords = await fetchAllDnsRecords(authKey, authEmail, zoneId);
             const dnsRecordIds = [];
             
             // Process each DNS record
@@ -294,13 +309,21 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                 currentIpLastOctet++;
             } else if (mode === "decrement") {
                 currentIpLastOctet--;
-            } 
+            }
 
         } catch (error) {
             errors.push({
                 domain: domainName,
+                ip: `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`,
                 error: error instanceof Error ? error.message : "Unknown error occurred"
             });
+            
+            // Still increment IP for next domain
+            if (mode === "increment") {
+                currentIpLastOctet++;
+            } else if (mode === "decrement") {
+                currentIpLastOctet--;
+            }
         }
     }
 
