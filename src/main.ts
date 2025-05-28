@@ -1,6 +1,8 @@
 import dotenv from "dotenv"
 import express from "express";
 import { createDnsRecord, createZone, fetchAllDnsRecords, fetchAllZones, updateDnsRecord, updateSslTlsSettings } from "./util";
+import fs from "fs";
+import path from "path";
 
 // Load environment variables as early as possible
 dotenv.config();
@@ -142,6 +144,15 @@ app.post("/api/v1/cloudflare/createZoneWithDnsRecord", async (req, res) => {
 
     // Process each domain
     for (const domainName of domains) {
+        // Skip undefined or empty domains
+        if (!domainName || typeof domainName !== 'string') {
+            errors.push({
+                domain: domainName || 'undefined',
+                error: `Invalid domain name: ${domainName}`
+            });
+            continue;
+        }
+
         try {
             // Construct current IP
             const currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
@@ -191,29 +202,80 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
     const body = req.body;
     const authKey = body["X-Auth-Key"];
     const authEmail = body["X-Auth-Email"];
-    const domains = Array.isArray(body.domain_name) ? body.domain_name : [body.domain_name];
+    let domains = Array.isArray(body.domain_name) ? body.domain_name : [body.domain_name];
     const dnsRecordNames = body.dns_record_names;
     const accountId = body.account_id;
     const type = body.type;
     const startingIp = body.ip;
     const mode = body.mode || "increment"; // Default to increment if not specified
 
+    // Debug: Log the request body structure
+    console.log("Request body keys:", Object.keys(body));
+    console.log("domain_name value:", body.domain_name);
+    console.log("mode:", mode);
+
     // Check auth key and email
     if (!authKey || !authEmail) {
         return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Bad requests
-    if (!domains.length || !dnsRecordNames || !accountId || !type || !startingIp) {
-        return res.status(400).json({ message: "Bad Request" });
+    // Load domain-to-IP mappings for file mode
+    let domainIpMap: Record<string, string> = {};
+    if (mode === "file") {
+        try {
+            const domainsJsonPath = path.join(process.cwd(), "domains.json");
+            const domainsData = fs.readFileSync(domainsJsonPath, "utf-8");
+            domainIpMap = JSON.parse(domainsData);
+            console.log(`Loaded ${Object.keys(domainIpMap).length} domain-to-IP mappings from domains.json`);
+            
+            // If no domains specified in request, use all domains from JSON file
+            if (!body.domain_name || domains.includes(undefined) || domains.length === 0) {
+                domains = Object.keys(domainIpMap);
+                console.log(`No domains specified in request, using all ${domains.length} domains from domains.json`);
+            } else {
+                console.log(`Using specified domains:`, domains);
+            }
+            
+            console.log(`Available domains in JSON:`, Object.keys(domainIpMap).slice(0, 10) + '...');
+        } catch (error) {
+            return res.status(500).json({ 
+                message: "Failed to load domains.json file", 
+                error: error instanceof Error ? error.message : "Unknown error" 
+            });
+        }
+    } else {
+        // For non-file modes, domain_name is required
+        if (!body.domain_name || domains.includes(undefined) || domains.length === 0) {
+            return res.status(400).json({ 
+                message: "Bad Request: domain_name is required for increment/decrement/static modes",
+                received_domain_name: body.domain_name,
+                processed_domains: domains
+            });
+        }
+    }
+
+    console.log("domains after processing:", domains.slice(0, 5) + '...');
+
+    // Bad requests - basic required fields
+    if (!dnsRecordNames || !accountId || !type) {
+        return res.status(400).json({ message: "Bad Request: dns_record_names, account_id, and type are required" });
+    }
+
+    // For non-file modes, we still need startingIp
+    if (mode !== "file" && !startingIp) {
+        return res.status(400).json({ message: "Bad Request: ip is required for increment/decrement/static modes" });
     }
 
     const results = [];
     const errors = [];
 
-    // Split IP into octets for incrementing
-    const ipParts = startingIp.split('.');
-    let currentIpLastOctet = parseInt(ipParts[3]);
+    // Split IP into octets for incrementing (only for non-file modes)
+    let ipParts: string[] = [];
+    let currentIpLastOctet = 0;
+    if (mode !== "file" && startingIp) {
+        ipParts = startingIp.split('.');
+        currentIpLastOctet = parseInt(ipParts[3]);
+    }
 
     // Fetch ALL existing zones (handling pagination)
     const zoneMap = new Map<string, CloudflareZone>();
@@ -247,9 +309,40 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
 
     // Process each domain
     for (const domainName of domains) {
+        // Skip undefined or empty domains
+        if (!domainName || typeof domainName !== 'string') {
+            errors.push({
+                domain: domainName || 'undefined',
+                error: `Invalid domain name: ${domainName}`
+            });
+            continue;
+        }
+
+        console.log(`\n=== Processing domain: ${domainName} ===`);
+
         try {
-            // Construct current IP
-            const currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+            // Determine current IP based on mode
+            let currentIp: string;
+            
+            if (mode === "file") {
+                currentIp = domainIpMap[domainName];
+                if (!currentIp) {
+                    console.log(`❌ Domain "${domainName}" not found in domains.json file`);
+                    console.log(`Available domains that start with "${domainName.charAt(0)}":`, 
+                        Object.keys(domainIpMap).filter(d => d.startsWith(domainName.charAt(0))).slice(0, 5));
+                    errors.push({
+                        domain: domainName,
+                        error: `Domain not found in domains.json file`
+                    });
+                    continue;
+                }
+                console.log(`✅ Found domain "${domainName}" with IP: ${currentIp}`);
+            } else {
+                // Construct current IP for increment/decrement/static modes
+                currentIp = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+                console.log(`📍 Using IP: ${currentIp} for domain: ${domainName}`);
+            }
+
             let zoneId;
             let action = "created";
 
@@ -259,19 +352,51 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                 // Use existing zone
                 zoneId = existingZone.id;
                 action = "updated";
+                console.log(`🔄 Using existing zone for ${domainName}, zone ID: ${zoneId}`);
             } else {
                 // Create new zone
+                console.log(`🆕 Creating new zone for ${domainName}...`);
+                console.log(`Zone creation parameters:`, {
+                    domainName,
+                    accountId,
+                    type
+                });
+                
                 const createZoneResponse = await createZone(authKey, authEmail, domainName, accountId, type);
+                console.log(`📋 Create zone response for ${domainName}:`, JSON.stringify(createZoneResponse, null, 2));
+                
+                if (!createZoneResponse || !createZoneResponse.result) {
+                    console.log(`❌ Create zone failed for ${domainName} - no result in response`);
+                    throw new Error(`Failed to create zone: ${createZoneResponse?.errors?.[0]?.message || 'Unknown error'}`);
+                }
+                
+                if (!createZoneResponse.result.id) {
+                    console.log(`❌ Create zone failed for ${domainName} - no ID in result`);
+                    throw new Error(`Zone creation returned no ID: ${JSON.stringify(createZoneResponse.result)}`);
+                }
+                
                 zoneId = createZoneResponse.result.id;
+                console.log(`✅ Successfully created zone for ${domainName}, zone ID: ${zoneId}`);
             }
 
             // Fetch existing DNS records
+            console.log(`🔍 Fetching existing DNS records for zone ${zoneId}...`);
             const existingRecords = await fetchAllDnsRecords(authKey, authEmail, zoneId);
+            console.log(`📋 DNS records response for ${domainName}:`, JSON.stringify(existingRecords, null, 2));
+            
+            if (!existingRecords || !existingRecords.result) {
+                console.log(`❌ Failed to fetch DNS records for ${domainName} - no result in response`);
+                throw new Error(`Failed to fetch DNS records: ${existingRecords?.errors?.[0]?.message || 'Unknown error'}`);
+            }
+            
+            console.log(`📊 Found ${existingRecords.result.length} existing DNS records for ${domainName}`);
+            
             const dnsRecordIds = [];
             
             // Process each DNS record
             for (const dnsRecordName of dnsRecordNames) {
                 const name = dnsRecordName === "@" ? domainName : `${dnsRecordName}.${domainName}`;
+                console.log(`\n  🔧 Processing DNS record: ${name}`);
                 
                 // Find existing record
                 const existingRecord = (existingRecords.result as CloudflareDnsRecord[]).find(
@@ -281,6 +406,13 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                 let recordResponse;
                 if (existingRecord) {
                     // Update existing record
+                    console.log(`  🔄 Updating existing A record for ${name}, record ID: ${existingRecord.id}`);
+                    console.log(`  📝 Update parameters:`, {
+                        zoneId,
+                        recordId: existingRecord.id,
+                        newIp: currentIp
+                    });
+                    
                     recordResponse = await updateDnsRecord(
                         authKey,
                         authEmail,
@@ -289,8 +421,16 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                         existingRecord,
                         currentIp
                     );
+                    console.log(`  📋 Update DNS record response for ${name}:`, JSON.stringify(recordResponse, null, 2));
                 } else {
                     // Create new record
+                    console.log(`  🆕 Creating new A record for ${name}`);
+                    console.log(`  📝 Create parameters:`, {
+                        zoneId,
+                        name,
+                        ip: currentIp
+                    });
+                    
                     recordResponse = await createDnsRecord(
                         authKey,
                         authEmail,
@@ -298,8 +438,21 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                         name,
                         currentIp
                     );
+                    console.log(`  📋 Create DNS record response for ${name}:`, JSON.stringify(recordResponse, null, 2));
                 }
+                
+                if (!recordResponse || !recordResponse.result) {
+                    console.log(`  ❌ DNS record operation failed for ${name} - no result in response`);
+                    throw new Error(`DNS record operation failed for ${name}: ${recordResponse?.errors?.[0]?.message || 'Unknown error'}`);
+                }
+                
+                if (!recordResponse.result.name) {
+                    console.log(`  ❌ DNS record operation failed for ${name} - no name in result`);
+                    throw new Error(`DNS record operation returned no name: ${JSON.stringify(recordResponse.result)}`);
+                }
+                
                 dnsRecordIds.push(recordResponse.result.name);
+                console.log(`  ✅ Successfully processed DNS record for ${name}`);
             }
 
             results.push({
@@ -310,7 +463,9 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
                 dns_record_ids: dnsRecordIds
             });
 
-            // Increment IP for next domain
+            console.log(`✅ Successfully completed processing for ${domainName}`);
+
+            // Increment IP for next domain (only for non-file modes)
             if (mode === "increment") {
                 currentIpLastOctet++;
             } else if (mode === "decrement") {
@@ -318,13 +473,21 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
             }
 
         } catch (error) {
+            console.log(`❌ Error processing domain ${domainName}:`);
+            console.log(`Error details:`, error);
+            console.log(`Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
+            
+            const errorIp = mode === "file" ? 
+                (domainIpMap[domainName] || "unknown") : 
+                `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`;
+                
             errors.push({
                 domain: domainName,
-                ip: `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.${currentIpLastOctet}`,
+                ip: errorIp,
                 error: error instanceof Error ? error.message : "Unknown error occurred"
             });
             
-            // Still increment IP for next domain
+            // Still increment IP for next domain (only for non-file modes)
             if (mode === "increment") {
                 currentIpLastOctet++;
             } else if (mode === "decrement") {
@@ -335,6 +498,7 @@ app.post("/api/v1/cloudflare/upsertZoneWithDnsRecord", async (req, res) => {
 
     res.status(200).json({
         message: "Operation completed",
+        mode: mode,
         results,
         errors
     });

@@ -69,7 +69,7 @@ export const createZone = async (authKey: string, authEmail: string, zoneName: s
     return data;
 }
 
-export const createDnsRecord = async (authKey: string, authEmail: string, zoneId: string, dnsRecordName: string[], newIp: string) => {
+export const createDnsRecord = async (authKey: string, authEmail: string, zoneId: string, dnsRecordName: string, newIp: string) => {
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records", {
         method: "POST",
         headers: {
