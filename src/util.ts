@@ -7,8 +7,8 @@ const listZoneEndpoint = "https://api.cloudflare.com/client/v4/zones";
 export const fetchAllZones = async (authKey: string, authEmail: string, page: number) => {
     const response = await fetch(listZoneEndpoint + "?per_page=500&page=" + page, {
         headers: {
-            "X-Auth-Key": authKey as string,
-            "X-Auth-Email": authEmail as string,
+            "X-AUTH-KEY": authKey as string,
+            "X-AUTH-EMAIL": authEmail as string,
             "Content-Type": "application/json"
         }
     });
@@ -20,8 +20,8 @@ export const fetchAllZones = async (authKey: string, authEmail: string, page: nu
 export const fetchAllDnsRecords = async (authKey: string, authEmail: string, zoneId: string) => {
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records", {
         headers: {
-            "X-Auth-Key": authKey as string,
-            "X-Auth-Email": authEmail as string,
+            "X-AUTH-KEY": authKey as string,
+            "X-AUTH-EMAIL": authEmail as string,
             "Content-Type": "application/json"
         }
     });
@@ -35,8 +35,8 @@ export const updateDnsRecord = async (authKey: string, authEmail: string, zoneId
     const response = await fetch(listZoneEndpoint + "/" + zoneId + "/dns_records/" + recordId, {
         method: "PATCH",
         headers: {
-            "X-Auth-Key": authKey as string,
-            "X-Auth-Email": authEmail as string,
+            "X-AUTH-KEY": authKey as string,
+            "X-AUTH-EMAIL": authEmail as string,
             "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -53,8 +53,8 @@ export const createZone = async (authKey: string, authEmail: string, zoneName: s
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "X-Auth-Key": authKey,
-            "X-Auth-Email": authEmail
+            "X-AUTH-KEY": authKey,
+            "X-AUTH-EMAIL": authEmail
         },
         body: JSON.stringify({
             name: zoneName,
@@ -74,13 +74,30 @@ export const createDnsRecord = async (authKey: string, authEmail: string, zoneId
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            "X-Auth-Key": authKey,
-            "X-Auth-Email": authEmail
+            "X-AUTH-KEY": authKey,
+            "X-AUTH-EMAIL": authEmail
         },
         body: JSON.stringify({
             name: dnsRecordName,
             type: "A",
             content: newIp
+        })
+    });
+
+    const data = await response.json();
+    return data;
+}
+
+export const updateSslTlsSettings = async (authKey: string, authEmail: string, zoneId: string, sslMode: string) => {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/settings/ssl`, {
+        method: "PATCH",
+        headers: {
+            "X-AUTH-KEY": authKey,
+            "X-AUTH-EMAIL": authEmail,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            value: sslMode
         })
     });
 
